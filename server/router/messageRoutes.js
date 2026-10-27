@@ -5,7 +5,7 @@ import { isAuthenticated } from "../middlewares/auth.js";
 const router = express.Router();
 
 router.post("/send", sendMessage);
-router.get("/send", getAllMessage);
+router.get("/getall", getAllMessage);
 router.delete('/delete/:id', isAuthenticated, deleteMessage);
 
 export default router;
