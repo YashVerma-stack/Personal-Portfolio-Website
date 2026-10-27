@@ -3,6 +3,8 @@ import ErrorHandler from '../middlewares/error.js';
 import { User } from "../models/userSchema.js";
 import { v2 as cloudinary } from "cloudinary";
 import { generateToken } from "../utils/jwtToken.js";
+import { sendEmail } from "../utils/sendEmail.js";
+import crypto from "crypto"
 
 export const register = catchAsyncErrors(async (req, res, next) => {
     if (!req.files || Object.keys(req.files).length === 0) {
@@ -181,3 +183,131 @@ export const updatePassword = catchAsyncErrors(async (req, res, next) => {
 
 
 
+
+export const getUserForPortfolio = catchAsyncErrors(async (req, res, next) => {
+    const id = "6ad9eea24188b184b0d3f81e";
+    const user = await User.findById(id);
+    res.status(200).json({
+        success: true,
+        user,
+    });
+});
+
+export const forgotPassword = catchAsyncErrors(async (req, res, next) => {
+  const user = await User.findOne({ email: req.body.email });
+  if (!user) {
+    return next(new ErrorHandler("User Not Found!", 404));
+  }
+  const resetToken = user.getResetPasswordToken();
+
+  await user.save({ validateBeforeSave: false });
+
+  const resetPasswordUrl = `${process.env.DASHBOARD_URL}/password/reset/${resetToken}`;
+
+  const message = `Your Reset Password Token is:- \n\n ${resetPasswordUrl}  \n\n If 
+  You've not requested this email then, please ignore it.`;
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: `Personal Portfolio Dashboard Password Recovery`,
+      message,
+    });
+    res.status(201).json({
+      success: true,
+      message: `Email sent to ${user.email} successfully`,
+    });
+  } catch (error) {
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save({ validateBeforeSave: false });
+    return next(new ErrorHandler(error.message, 500));
+  }
+});
+
+
+
+// export const forgotPassword = catchAsyncErrors(async (req, res, next) => {
+//     const { email } = req.body || {};
+
+//     // 1. Validate email
+//     if (!email) {
+//         return next(
+//             new ErrorHandler("Please provide your email address.", 400)
+//         );
+//     }
+
+//     // 2. Find user
+//     const user = await User.findOne({ email });
+
+//     if (!user) {
+//         return next(new ErrorHandler("User not found!", 404));
+//     }
+
+//     // 3. Generate reset token
+//     const resetToken = user.getResetPasswordToken();
+
+//     await user.save({ validateBeforeSave: false });
+
+//     // 4. Create reset URL
+//     const resetPasswordUrl =
+//         `${process.env.DASHBOARD_URL}/password/reset/${resetToken}`;
+
+//     const message =
+//         `Your password reset link is:\n\n${resetPasswordUrl}\n\n` +
+//         "If you did not request this, please ignore this email.";
+
+//     // 5. Send email
+//     try {
+//         await sendEmail({
+//             email: user.email,
+//             subject: "Personal Portfolio Dashboard Password Recovery",
+//             message,
+//         });
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "Password reset email sent successfully!",
+//         });
+//     } catch (error) {
+//         // Remove the reset token if sending fails
+//         user.resetPasswordToken = undefined;
+//         user.resetPasswordExpire = undefined;
+
+//         await user.save({ validateBeforeSave: false });
+
+//         return next(
+//             new ErrorHandler("Failed to send password reset email.", 500)
+//         );
+//     }
+// });
+export const resetPassword = catchAsyncErrors(async (req, res, next) => {
+  const { token } = req.params;
+  const resetPasswordToken = crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
+  const user = await User.findOne({
+    resetPasswordToken,
+    resetPasswordExpire: { $gt: Date.now() },
+  });
+  if (!user) {
+    return next(
+      new ErrorHandler(
+        "Reset password token is invalid or has been expired.",
+        400
+      )
+    );
+  }
+
+  if (req.body.password !== req.body.confirmPassword) {
+    return next(new ErrorHandler("Password & Confirm Password do not match"));
+  }
+  user.password = await req.body.password;
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpire = undefined;
+
+  await user.save();
+
+  generateToken(user, "Reset Password Successfully!", 200, res);
+});
