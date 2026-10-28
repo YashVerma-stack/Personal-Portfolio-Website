@@ -5,6 +5,9 @@ import { v2 as cloudinary } from "cloudinary";
 import { generateToken } from "../utils/jwtToken.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import crypto from "crypto"
+import dotenv from "dotenv";
+
+dotenv.config({ path: "./config/config.env" });
 
 export const register = catchAsyncErrors(async (req, res, next) => {
     if (!req.files || Object.keys(req.files).length === 0) {
@@ -69,18 +72,18 @@ export const register = catchAsyncErrors(async (req, res, next) => {
 });
 
 export const login = catchAsyncErrors(async (req, res, next) => {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
     if (!email || !password) {
-        return next(new ErrorHandler("Email and Password are required!"));
+        return next(new ErrorHandler("Email and Password are required!", 400));
     }
     const user = await User.findOne({ email }).select("+password");
     if (!user) {
-        return next(new ErrorHandler("Invalid Email or Password"));
+        return next(new ErrorHandler("Invalid Email or Password.", 401));
     }
 
     const isPasswordMatched = await user.comparePassword(password);
     if (!isPasswordMatched) {
-        return next(new ErrorHandler("Invalid Email or Password"));
+        return next(new ErrorHandler("Invalid Email or Password.", 401));
     }
     generateToken(user, "Logged In", 200, res);
 })
@@ -103,22 +106,32 @@ export const getUser = catchAsyncErrors(async (req, res, next) => {
     });
 });
 
+
 export const updateProfile = catchAsyncErrors(async (req, res, next) => {
-    const newUserdata = {
-        fullName: req.body.fullName,
-        email: req.body.email,
-        phone: req.body.phone,
-        aboutMe: req.body.aboutMe,
-        portfolioURL: req.body.portfolioURL,
-        gitHubURL: req.body.gitHubURL,
-        linkedInURL: req.body.linkedInURL,
-    };
-    
-    if (req.files && req.files.avatar) {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+        return next(new ErrorHandler("User not found!", 404));
+    }
+
+
+    const body = req.body || {};
+
+    const newUserdata = {};
+
+    if (body.fullName !== undefined) newUserdata.fullName = body.fullName;
+    if (body.email !== undefined) newUserdata.email = body.email;
+    if (body.phone !== undefined) newUserdata.phone = body.phone;
+    if (body.aboutMe !== undefined) newUserdata.aboutMe = body.aboutMe;
+    if (body.portfolioURL !== undefined) newUserdata.portfolioURL = body.portfolioURL;
+    if (body.gitHubURL !== undefined) newUserdata.gitHubURL = body.gitHubURL;
+    if (body.linkedInURL !== undefined) newUserdata.linkedInURL = body.linkedInURL;
+
+
+    // Update avatar if a new one is provided
+    if (req.files?.avatar) {
         const avatar = req.files.avatar;
-        const user = await User.findById(req.user.id);
-        const profileImageId = user.avatar.public_id;
-        await cloudinary.uploader.destroy(profileImageId);
+
         const cloudinaryResponse = await cloudinary.uploader.upload(
             avatar.tempFilePath,
             { folder: "AVATARS" }
@@ -127,187 +140,263 @@ export const updateProfile = catchAsyncErrors(async (req, res, next) => {
         newUserdata.avatar = {
             public_id: cloudinaryResponse.public_id,
             url: cloudinaryResponse.secure_url,
-        }
+        };
     }
 
-    if (req.files && req.files.resume) {
+    // Update resume if a new one is provided
+    if (req.files?.resume) {
         const resume = req.files.resume;
-        const user = await User.findById(req.user.id);
-        const resumeId = user.resume.public_id;
-        await cloudinary.uploader.destroy(resumeId);
+
         const cloudinaryResponse = await cloudinary.uploader.upload(
             resume.tempFilePath,
-            { folder: "MY_RESUME" }
+            {
+                folder: "MY_RESUME",
+                resource_type: "raw",
+            }
         );
 
         newUserdata.resume = {
             public_id: cloudinaryResponse.public_id,
             url: cloudinaryResponse.secure_url,
-        }
+        };
     }
 
-    const user = await User.findByIdAndUpdate(req.user.id, newUserdata, {
-        new: true,
-        runValidators: true,
-        useFindAndModify: false,
-    });
-    res.status(200).json({
+    const updatedUser = await User.findByIdAndUpdate(
+        req.user.id,
+        { $set: newUserdata },
+        {
+            new: true,
+            runValidators: true,
+        }
+    );
+
+    // Delete old files only after the database update succeeds
+    if (newUserdata.avatar && user.avatar?.public_id) {
+        await cloudinary.uploader.destroy(user.avatar.public_id);
+    }
+
+    if (newUserdata.resume && user.resume?.public_id) {
+        await cloudinary.uploader.destroy(user.resume.public_id, {
+            resource_type: "raw",
+        });
+    }
+
+    return res.status(200).json({
         success: true,
         message: "Profile Updated",
-        user,
-    })
+        user: updatedUser,
+    });
 });
+
+
 
 export const updatePassword = catchAsyncErrors(async (req, res, next) => {
-  const { currentPassword, newPassword, confirmNewPassword } = req.body;
-  const user = await User.findById(req.user.id).select("+password");
-  if (!currentPassword || !newPassword || !confirmNewPassword) {
-    return next(new ErrorHandler("Please Fill All Fields.", 400));
-  }
-  const isPasswordMatched = await user.comparePassword(currentPassword);
-  if (!isPasswordMatched) {
-    return next(new ErrorHandler("Incorrect Current Password!"));
-  }
-  if (newPassword !== confirmNewPassword) {
-    return next(
-      new ErrorHandler("New Password And Confirm New Password Do Not Match!")
-    );
-  }
-  user.password = newPassword;
-  await user.save();
-  res.status(200).json({
-    success: true,
-    message: "Password Updated!",
-  });
-});
+    const { currentPassword, newPassword, confirmNewPassword } =
+        req.body || {};
 
+    if (!currentPassword || !newPassword || !confirmNewPassword) {
+        return next(
+            new ErrorHandler("Please fill in all fields.", 400)
+        );
+    }
 
+    if (newPassword.length < 8) {
+        return next(
+            new ErrorHandler(
+                "New password must be at least 8 characters long.",
+                400
+            )
+        );
+    }
 
+    if (newPassword !== confirmNewPassword) {
+        return next(
+            new ErrorHandler(
+                "New password and confirmation do not match.",
+                400
+            )
+        );
+    }
 
-export const getUserForPortfolio = catchAsyncErrors(async (req, res, next) => {
-    const id = "6ad9eea24188b184b0d3f81e";
-    const user = await User.findById(id);
-    res.status(200).json({
+    const user = await User.findById(req.user.id).select("+password");
+
+    if (!user) {
+        return next(new ErrorHandler("User not found!", 404));
+    }
+
+    const isPasswordMatched = await user.comparePassword(currentPassword);
+
+    if (!isPasswordMatched) {
+        return next(
+            new ErrorHandler("Incorrect current password!", 401)
+        );
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    return res.status(200).json({
         success: true,
-        user,
+        message: "Password updated successfully!",
     });
 });
+
+export const getUserForPortfolio = catchAsyncErrors(
+    async (req, res, next) => {
+        const id = process.env.PORTFOLIO_OWNER_ID;
+
+        if (!id) {
+            return next(
+                new ErrorHandler(
+                    "Portfolio owner ID is not configured.",
+                    500
+                )
+            );
+        }
+
+        const user = await User.findById(id).select(
+            "fullName email phone aboutMe portfolioURL gitHubURL linkedInURL avatar resume"
+        );
+
+        if (!user) {
+            return next(
+                new ErrorHandler("Portfolio owner not found!", 404)
+            );
+        }
+
+        return res.status(200).json({
+            success: true,
+            user,
+        });
+    }
+);
+
+
 
 export const forgotPassword = catchAsyncErrors(async (req, res, next) => {
-  const user = await User.findOne({ email: req.body.email });
-  if (!user) {
-    return next(new ErrorHandler("User Not Found!", 404));
-  }
-  const resetToken = user.getResetPasswordToken();
+    const { email } = req.body || {};
 
-  await user.save({ validateBeforeSave: false });
+    if (!email) {
+        return next(
+            new ErrorHandler("Please provide your email address.", 400)
+        );
+    }
 
-  const resetPasswordUrl = `${process.env.DASHBOARD_URL}/password/reset/${resetToken}`;
+    const user = await User.findOne({ email });
 
-  const message = `Your Reset Password Token is:- \n\n ${resetPasswordUrl}  \n\n If 
-  You've not requested this email then, please ignore it.`;
+    // Use the same response for registered and unregistered emails
+    if (!user) {
+        return res.status(200).json({
+            success: true,
+            message:
+                "If an account exists with this email, a password reset link will be sent.",
+        });
+    }
 
-  try {
-    await sendEmail({
-      email: user.email,
-      subject: `Personal Portfolio Dashboard Password Recovery`,
-      message,
-    });
-    res.status(201).json({
-      success: true,
-      message: `Email sent to ${user.email} successfully`,
-    });
-  } catch (error) {
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpire = undefined;
+    const resetToken = user.getResetPasswordToken();
+
     await user.save({ validateBeforeSave: false });
-    return next(new ErrorHandler(error.message, 500));
-  }
+
+    const resetPasswordUrl =
+        `${process.env.DASHBOARD_URL}/password/reset/${resetToken}`;
+
+    const message =
+        `Use the following link to reset your password:\n\n` +
+        `${resetPasswordUrl}\n\n` +
+        "If you did not request this, please ignore this email.";
+
+    try {
+        await sendEmail({
+            email: user.email,
+            subject: "Personal Portfolio Dashboard Password Recovery",
+            message,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message:
+                "If an account exists with this email, a password reset link will be sent.",
+        });
+    } catch (error) {
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+
+        await user.save({ validateBeforeSave: false });
+
+        return next(
+            new ErrorHandler("Failed to send password reset email.", 500)
+        );
+    }
 });
 
 
 
-// export const forgotPassword = catchAsyncErrors(async (req, res, next) => {
-//     const { email } = req.body || {};
-
-//     // 1. Validate email
-//     if (!email) {
-//         return next(
-//             new ErrorHandler("Please provide your email address.", 400)
-//         );
-//     }
-
-//     // 2. Find user
-//     const user = await User.findOne({ email });
-
-//     if (!user) {
-//         return next(new ErrorHandler("User not found!", 404));
-//     }
-
-//     // 3. Generate reset token
-//     const resetToken = user.getResetPasswordToken();
-
-//     await user.save({ validateBeforeSave: false });
-
-//     // 4. Create reset URL
-//     const resetPasswordUrl =
-//         `${process.env.DASHBOARD_URL}/password/reset/${resetToken}`;
-
-//     const message =
-//         `Your password reset link is:\n\n${resetPasswordUrl}\n\n` +
-//         "If you did not request this, please ignore this email.";
-
-//     // 5. Send email
-//     try {
-//         await sendEmail({
-//             email: user.email,
-//             subject: "Personal Portfolio Dashboard Password Recovery",
-//             message,
-//         });
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "Password reset email sent successfully!",
-//         });
-//     } catch (error) {
-//         // Remove the reset token if sending fails
-//         user.resetPasswordToken = undefined;
-//         user.resetPasswordExpire = undefined;
-
-//         await user.save({ validateBeforeSave: false });
-
-//         return next(
-//             new ErrorHandler("Failed to send password reset email.", 500)
-//         );
-//     }
-// });
 export const resetPassword = catchAsyncErrors(async (req, res, next) => {
-  const { token } = req.params;
-  const resetPasswordToken = crypto
-    .createHash("sha256")
-    .update(token)
-    .digest("hex");
-  const user = await User.findOne({
-    resetPasswordToken,
-    resetPasswordExpire: { $gt: Date.now() },
-  });
-  if (!user) {
-    return next(
-      new ErrorHandler(
-        "Reset password token is invalid or has been expired.",
-        400
-      )
+    const { token } = req.params;
+    const { password, confirmPassword } = req.body || {};
+
+    if (!token) {
+        return next(
+            new ErrorHandler("Reset password token is required.", 400)
+        );
+    }
+
+    if (!password || !confirmPassword) {
+        return next(
+            new ErrorHandler(
+                "Password and confirm password are required.",
+                400
+            )
+        );
+    }
+
+    if (password.length < 8) {
+        return next(
+            new ErrorHandler(
+                "Password must be at least 8 characters long.",
+                400
+            )
+        );
+    }
+
+    if (password !== confirmPassword) {
+        return next(
+            new ErrorHandler(
+                "Password and confirm password do not match.",
+                400
+            )
+        );
+    }
+
+    const resetPasswordToken = crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
+
+    const user = await User.findOne({
+        resetPasswordToken,
+        resetPasswordExpire: { $gt: Date.now() },
+    });
+
+    if (!user) {
+        return next(
+            new ErrorHandler(
+                "Reset password token is invalid or has expired.",
+                400
+            )
+        );
+    }
+
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+
+    await user.save();
+
+    return generateToken(
+        user,
+        "Password reset successfully!",
+        200,
+        res
     );
-  }
-
-  if (req.body.password !== req.body.confirmPassword) {
-    return next(new ErrorHandler("Password & Confirm Password do not match"));
-  }
-  user.password = await req.body.password;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpire = undefined;
-
-  await user.save();
-
-  generateToken(user, "Reset Password Successfully!", 200, res);
 });
