@@ -70,7 +70,7 @@ export const updateSkill = catchAsyncErrors(async (req, res, next) => {
     }
 
     const updatedSkill = await Skill.findByIdAndUpdate(id, { proficiency }, {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
         useFindAndModify: false,
     });
