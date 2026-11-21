@@ -29,6 +29,24 @@ const userSlice = createSlice({
             state.user = {};
             state.error = action.payload;
         },
+        loadUserRequest(state, action) {
+            state.loading = true;
+            state.isAuthenticated = false;
+            state.user = {};
+            state.error = null;
+        },
+        loadUserSuccess(state, action) {
+            state.loading = false;
+            state.isAuthenticated = true;
+            state.user = action.payload;
+            state.error = null;
+        },
+        loadUserFailed(state, action) {
+            state.loading = false;
+            state.isAuthenticated = false;
+            state.user = {};
+            state.error = action.payload;
+        },
         clearAllErrors(state, action) {
             state.error =   null;
             state.user = state.user;
@@ -48,6 +66,21 @@ export const login = (email, password) => async (dispatch) => {
         dispatch(userSlice.actions.clearAllErrors());
     } catch (error) {
         dispatch(userSlice.actions.loginFailed(error.response.data.message));
+    }
+};
+
+export const getUser = () => async (dispatch) => {
+    dispatch(userSlice.actions.loadUserRequest());
+    try {
+        const {data} = await axios.get(
+            "http://localhost:4000/api/v1/user/me", 
+            
+            {withCredentials: true}
+        );
+        dispatch(userSlice.actions.loadUserSuccess(data.user));
+        dispatch(userSlice.actions.clearAllErrors());
+    } catch (error) {
+        dispatch(userSlice.actions.loadUserFailed(error.response.data.message));
     }
 };
 
