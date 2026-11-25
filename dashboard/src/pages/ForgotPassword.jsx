@@ -36,9 +36,9 @@ const ForgotPassword = () => {
   }, [dispatch, isAuthenticated, error, loading]);
 
   return (
-    <div className="w-full lg:grid lg:min-h-[100vh] lg:grid-cols-2 xl:min-h-[100vh]">
-      <div className=" min-h-[100vh] flex items-center justify-center py-12">
-        <div className="mx-auto grid w-[350px] gap-6">
+    <div className="w-full lg:grid lg:min-h-screen lg:grid-cols-2 xl:min-h-screen">
+      <div className=" min-h-screen flex items-center justify-center py-12">
+        <div className="mx-auto grid w-87.5 gap-6">
           <div className="grid gap-2 text-center">
             <h1 className="text-3xl font-bold">Forgot Password</h1>
             <p className="text-balance text-muted-foreground">
