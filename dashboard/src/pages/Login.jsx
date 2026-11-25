@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { clearAllUserErrors, login } from "@/store/slices/userSlice";
 import { toast } from "react-toastify";
+import SpecialLoadingButton from "./sub-components/SpecialLoadingButton";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -53,7 +54,7 @@ const Login = () => {
             </div>
             <div className="grid gap-2">
               <div className="flex items-center">
-                <Label htmlFor="password" >Password</Label>
+                <Label htmlFor="password">Password</Label>
                 <Link
                   to={"/password/forgot"}
                   className="ml-auto inline-block text-sm underline"
@@ -61,11 +62,20 @@ const Login = () => {
                   Forgot your password?
                 </Link>
               </div>
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
             </div>
-            <Button type="submit" className="w-full" onClick={handleLogin} >
-              Login
-            </Button>
+            {loading ? (
+              <SpecialLoadingButton content={"Logging In"} />
+            ) : (
+              <Button type="submit" className="w-full" onClick={handleLogin}>
+                Login
+              </Button>
+            )}
           </div>
         </div>
       </div>
